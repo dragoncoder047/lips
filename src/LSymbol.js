@@ -3,7 +3,9 @@
  * Copyright (c) 2018-2021 Jakub T. Jankiewicz <https://jcubic.pl/me>
  * Released under the MIT license
  */
+/* global Symbol */
 import LString from './LString.js';
+import { hidden_prop } from './utils.js';
 
 // ----------------------------------------------------------------------
 function LSymbol(name) {

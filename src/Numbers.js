@@ -3,15 +3,21 @@
  * Copyright (c) 2018-2021 Jakub T. Jankiewicz <https://jcubic.pl/me>
  * Released under the MIT license
  */
+/* global BigInt */
+import root from './root.js';
+import LString from './LString.js';
+import { type } from './typechecking.js';
 
-// -------------------------------------------------------------------------
+const BN = root.BN;
+
+// -----------------------------------------------------------------------------
 var pow = function(a, b) {
     var e = typeof a === 'bigint' ? BigInt(1) : 1;
     return new Array(Number(b)).fill(0).reduce(x => x * a, e);
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // use native exponential operator if possible (it's way faster)
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 var exp_op = new Function('a,b', 'return a ** b');
 try {
     if (exp_op(2, 2) === 4) {
@@ -21,9 +27,9 @@ try {
     // ignore
 }
 
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // :: Number wrapper that handle BigNumbers
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function LNumber(n, force = false) {
     if (n instanceof LNumber) {
         return n;
@@ -120,7 +126,7 @@ function LNumber(n, force = false) {
         this.constant(n, 'integer');
     }
 }
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.prototype.constant = function(value, type) {
     Object.defineProperty(this, '__value__', {
         value,
@@ -131,7 +137,7 @@ LNumber.prototype.constant = function(value, type) {
         enumerable: true
     });
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.types = {
     float: function(n, force = false) {
         return new LFloat(n, force);
@@ -149,15 +155,15 @@ LNumber.types = {
         return new LRational(n, force);
     }
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.prototype.serialize = function() {
     return this.__value__;
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.prototype.isNaN = function() {
     return Number.isNaN(this.__value__);
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.prototype.gcd = function(b) {
     // ref: https://rosettacode.org/wiki/Greatest_common_divisor#JavaScript
     var a = this.abs();
@@ -178,16 +184,16 @@ LNumber.prototype.gcd = function(b) {
         }
     }
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.isFloat = function isFloat(n) {
     return n instanceof LFloat || (Number(n) === n && n % 1 !== 0);
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.isNumber = function(n) {
     return n instanceof LNumber ||
         (LNumber.isNative(n) || LNumber.isBN(n));
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.isComplex = function(n) {
     if (!n) {
         return false;
@@ -197,7 +203,7 @@ LNumber.isComplex = function(n) {
          (LNumber.isNumber(n.re) || Number.isNaN(n.re)));
     return ret;
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.isRational = function(n) {
     if (!n) {
         return false;
@@ -205,7 +211,7 @@ LNumber.isRational = function(n) {
     return n instanceof LRational ||
         (LNumber.isNumber(n.num) && LNumber.isNumber(n.denom));
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.isInteger = function(n) {
     if (!(LNumber.isNative(n) || n instanceof LNumber)) {
         return false;
@@ -221,20 +227,20 @@ LNumber.isInteger = function(n) {
     }
     return true;
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.isNative = function(n) {
     return typeof n === 'bigint' || typeof n === 'number';
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.isBigInteger = function(n) {
     return n instanceof LBigInteger || typeof n === 'bigint' ||
         LNumber.isBN(n);
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.isBN = function(n) {
     return typeof BN !== 'undefined' && n instanceof BN;
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.getArgsType = function(a, b) {
     if (a instanceof LFloat || b instanceof LFloat) {
         return LFloat;
@@ -244,7 +250,7 @@ LNumber.getArgsType = function(a, b) {
     }
     return LNumber;
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.prototype.toString = function(radix) {
     if (Number.isNaN(this.__value__)) {
         return '+nan.0';
@@ -254,17 +260,17 @@ LNumber.prototype.toString = function(radix) {
     }
     return this.__value__.toString();
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.prototype.asType = function(n) {
     var _type = LNumber.getType(this);
     return LNumber.types[_type] ? LNumber.types[_type](n) : LNumber(n);
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.prototype.isBigNumber = function() {
     return typeof this.__value__ === 'bigint' ||
         typeof BN !== 'undefined' && !(this.value instanceof BN);
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 ['floor', 'ceil', 'round'].forEach(fn => {
     LNumber.prototype[fn] = function() {
         if (this.float || LNumber.isFloat(this.__value__)) {
@@ -274,7 +280,7 @@ LNumber.prototype.isBigNumber = function() {
         }
     };
 });
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.prototype.valueOf = function() {
     if (LNumber.isNative(this.__value__)) {
         return Number(this.__value__);
@@ -283,7 +289,7 @@ LNumber.prototype.valueOf = function() {
     }
 };
 
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.prototype.pow = function(n) {
     var value;
     if (LNumber.isBN(this.__value__)) {
@@ -293,7 +299,7 @@ LNumber.prototype.pow = function(n) {
     }
     return LNumber(value);
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.prototype.abs = function() {
     var value = this.__value__;
     if (LNumber.isNative(this.__value__)) {
@@ -305,7 +311,7 @@ LNumber.prototype.abs = function() {
     }
     return new LNumber(value);
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.prototype.isOdd = function() {
     if (LNumber.isNative(this.__value__)) {
         if (this.isBigNumber()) {
@@ -316,11 +322,11 @@ LNumber.prototype.isOdd = function() {
         return this.__value__.isOdd();
     }
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.prototype.isEven = function() {
     return !this.isOdd();
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.prototype.cmp = function(n) {
     const [a, b] = this.coerce(n);
     function cmp(a, b) {
@@ -343,12 +349,12 @@ LNumber.prototype.cmp = function(n) {
     }
 };
 
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.prototype.isFloat = function() {
     return !!(LNumber.isFloat(this.__value__) || this.float);
 };
 
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.prototype.coerce = function(n) {
     if (!(typeof n === 'number' || n instanceof LNumber)) {
         throw new Error(`LNumber: you can't coerce ${type(n)}`);
@@ -359,7 +365,7 @@ LNumber.prototype.coerce = function(n) {
     return LNumber.coerce(this, n);
 };
 
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.coerce = function(a, b) {
     const a_type = LNumber.getType(a);
     const b_type = LNumber.getType(b);
@@ -372,7 +378,7 @@ LNumber.coerce = function(a, b) {
     return tmp.map(n => LNumber(n, true));
 };
 
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.getType = function(n) {
     if (n instanceof LNumber) {
         return n.__type__;
@@ -396,7 +402,7 @@ LNumber.getType = function(n) {
 };
 
 
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 var mapping = {
     'add': '+',
     'sub': '-',
@@ -416,7 +422,7 @@ Object.keys(mapping).forEach((key) => {
         return this.op(mapping[key], n);
     };
 });
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber._ops = {
     '*': function(a, b) {
         return a * b;
@@ -452,7 +458,7 @@ LNumber._ops = {
         return a << b;
     }
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.prototype.op = function(op, n) {
     if (typeof n === 'undefined') {
         return LNumber(LNumber._ops[op](this.valueOf()));
@@ -470,7 +476,7 @@ LNumber.prototype.op = function(op, n) {
     }
     return LNumber(LNumber._ops[op](a, b));
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.prototype.sqrt = function() {
     var value = this.valueOf();
     if (this.cmp(0) < 0) {
@@ -479,9 +485,9 @@ LNumber.prototype.sqrt = function() {
     }
     return LNumber(Math.sqrt(value));
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // :: COMPLEX TYPE
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function LComplex(n, force = false) {
     if (typeof this !== 'undefined' && !(this instanceof LComplex) ||
         typeof this === 'undefined') {
@@ -501,10 +507,10 @@ function LComplex(n, force = false) {
     var re = n.re instanceof LNumber ? n.re : LNumber(n.re);
     this.constant(im, re);
 }
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LComplex.prototype = Object.create(LNumber.prototype);
 LComplex.prototype.constructor = LComplex;
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LComplex.prototype.constant = function(im, re) {
     Object.defineProperty(this, '__im__', {
         value: im,
@@ -519,14 +525,14 @@ LComplex.prototype.constant = function(im, re) {
         enumerable: true
     });
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LComplex.prototype.serialize = function() {
     return {
         re: this.__re__,
         im: this.__im__
     };
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LComplex.prototype.toRational = function(n) {
     if (LNumber.isFloat(this.__im__) && LNumber.isFloat(this.__re__)) {
         const im = LFloat(this.__im__).toRational(n);
@@ -535,7 +541,7 @@ LComplex.prototype.toRational = function(n) {
     }
     return this;
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LComplex.prototype.add = function(n) {
     return this.complex_op('add', n, function(a_re, b_re, a_im, b_im) {
         return {
@@ -544,9 +550,9 @@ LComplex.prototype.add = function(n) {
         };
     });
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // :: factor is used in / and modulus
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LComplex.prototype.factor = function() {
     // fix rounding when calculating (/ 1.0 1/10+1/10i)
     if (this.__im__ instanceof LFloat || this.__im__ instanceof LFloat) {
@@ -567,15 +573,15 @@ LComplex.prototype.factor = function() {
         return this.__re__.mul(this.__re__).add(this.__im__.mul(this.__im__));
     }
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LComplex.prototype.modulus = function() {
     return this.factor().sqrt();
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LComplex.prototype.conjugate = function() {
     return LComplex({ re: this.__re__, im: this.__im__.sub() });
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LComplex.prototype.sqrt = function() {
     const r = this.modulus();
     // code based ok Kawa Scheme source code (file DComplex.java)
@@ -596,7 +602,7 @@ LComplex.prototype.sqrt = function() {
     }
     return LComplex({ im, re });
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LComplex.prototype.div = function(n) {
     if (LNumber.isNumber(n) && !LNumber.isComplex(n)) {
         if (!(n instanceof LNumber)) {
@@ -615,7 +621,7 @@ LComplex.prototype.div = function(n) {
     const im = num.__im__.op('/', denom);
     return LComplex({ re, im });
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LComplex.prototype.sub = function(n) {
     return this.complex_op('sub', n, function(a_re, b_re, a_im, b_im) {
         return {
@@ -624,7 +630,7 @@ LComplex.prototype.sub = function(n) {
         };
     });
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LComplex.prototype.mul = function(n) {
     return this.complex_op('mul', n, function(a_re, b_re, a_im, b_im) {
         var ret = {
@@ -634,7 +640,7 @@ LComplex.prototype.mul = function(n) {
         return ret;
     });
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LComplex.prototype.complex_op = function(name, n, fn) {
     const calc = (re, im) => {
         var result = fn(this.__re__, re, this.__im__, im);
@@ -662,19 +668,19 @@ LComplex.prototype.complex_op = function(name, n, fn) {
     var im = n.__im__ instanceof LNumber ? n.__im__ : this.__im__.asType(n.__im__);
     return calc(re, im);
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LComplex._op = {
     '+': 'add',
     '-': 'sub',
     '*': 'mul',
     '/': 'div'
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LComplex.prototype._op = function(op, n) {
     const fn = LComplex._op[op];
     return this[fn](n);
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LComplex.prototype.cmp = function(n) {
     const [a, b] = this.coerce(n);
     const [re_a, re_b] = a.__re__.coerce(b.__re__);
@@ -686,11 +692,11 @@ LComplex.prototype.cmp = function(n) {
         return im_a.cmp(im_b);
     }
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LComplex.prototype.valueOf = function() {
     return [this.__re__, this.__im__].map(x => x.valueOf());
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LComplex.prototype.toString = function() {
     var result;
     if (this.__re__.cmp(0) !== 0) {
@@ -715,9 +721,9 @@ LComplex.prototype.toString = function() {
     result.push('i');
     return result.join('');
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // :: FLOAT TYPE
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function LFloat(n) {
     if (typeof this !== 'undefined' && !(this instanceof LFloat) ||
         typeof this === 'undefined') {
@@ -738,10 +744,10 @@ function LFloat(n) {
         this.constant(n, 'float');
     }
 }
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LFloat.prototype = Object.create(LNumber.prototype);
 LFloat.prototype.constructor = LFloat;
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LFloat.prototype.toString = function() {
     if (this.__value__ === Number.NEGATIVE_INFINITY) {
         return '-inf.0';
@@ -759,7 +765,7 @@ LFloat.prototype.toString = function() {
     }
     return str.replace(/^([0-9]+)e/, '$1.0e');
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LFloat.prototype._op = function(op, n) {
     if (n instanceof LNumber) {
         n = n.__value__;
@@ -770,7 +776,7 @@ LFloat.prototype._op = function(op, n) {
     }
     return LFloat(fn(this.__value__, n), true);
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // same aproximation as in guile scheme
 LFloat.prototype.toRational = function(n = null) {
     if (n === null) {
@@ -778,7 +784,7 @@ LFloat.prototype.toRational = function(n = null) {
     }
     return approxRatio(n.valueOf())(this.__value__.valueOf());
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LFloat.prototype.sqrt = function() {
     var value = this.valueOf();
     if (this.cmp(0) < 0) {
@@ -787,7 +793,7 @@ LFloat.prototype.sqrt = function() {
     }
     return LFloat(Math.sqrt(value));
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LFloat.prototype.abs = function() {
     var value = this.valueOf();
     if (value < 0) {
@@ -795,9 +801,9 @@ LFloat.prototype.abs = function() {
     }
     return LFloat(value);
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // ref: https://rosettacode.org/wiki/Convert_decimal_number_to_rational
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 var toRational = approxRatio(1e-10);
 function approxRatio(eps) {
     return function(n) {
@@ -812,12 +818,12 @@ function approxRatio(eps) {
         return LRational({ num: Math.floor(n / c), denom: Math.floor(1 / c) });
     };
 }
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // :: source: Kawa gnu.math.RatNum.java
 // :: This algorithm is by Alan Bawden. It has been transcribed
 // :: with permission from Kawa copyright M.A. Bothner.
 // :: which was transcribed from from C-Gambit, copyright Marc Feeley.
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function rationalize(x, y) {
     var a = x.sub(y);
     var b = x.add(y);
@@ -838,7 +844,7 @@ function rationalize(x, y) {
     }
     return result;
 }
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function simplest_rational2(x, y) {
     var fx = LNumber(x).floor();
     var fy = LNumber(y).floor();
@@ -852,7 +858,7 @@ function simplest_rational2(x, y) {
         return fx.add(LNumber(1));
     }
 }
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function LRational(n, force = false) {
     if (typeof this !== 'undefined' && !(this instanceof LRational) ||
         typeof this === 'undefined') {
@@ -877,10 +883,10 @@ function LRational(n, force = false) {
     }
     this.constant(num, denom);
 }
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LRational.prototype = Object.create(LNumber.prototype);
 LRational.prototype.constructor = LRational;
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LRational.prototype.constant = function(num, denom) {
     Object.defineProperty(this, '__num__', {
         value: num,
@@ -895,14 +901,14 @@ LRational.prototype.constant = function(num, denom) {
         enumerable: true
     });
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LRational.prototype.serialize = function() {
     return {
         num: this.__num__,
         denom: this.__denom__
     };
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LRational.prototype.pow = function(n) {
     var cmp = n.cmp(0);
     if (cmp === 0) {
@@ -922,7 +928,7 @@ LRational.prototype.pow = function(n) {
     }
     return result;
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LRational.prototype.sqrt = function() {
     const num = this.__num__.sqrt();
     const denom = this.__denom__.sqrt();
@@ -931,7 +937,7 @@ LRational.prototype.sqrt = function() {
     }
     return LRational({ num, denom });
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LRational.prototype.abs = function() {
     var num = this.__num__;
     var denom = this.__denom__;
@@ -943,11 +949,11 @@ LRational.prototype.abs = function() {
     }
     return LRational({ num, denom });
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LRational.prototype.cmp = function(n) {
     return LNumber(this.valueOf(), true).cmp(n);
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LRational.prototype.toString = function() {
     var gcd = this.__num__.gcd(this.__denom__);
     var num, denom;
@@ -974,7 +980,7 @@ LRational.prototype.toString = function() {
     }
     return num.toString() + '/' + denom.toString();
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LRational.prototype.valueOf = function(exact) {
     if (this.__denom__.cmp(0) === 0) {
         if (this.__num__.cmp(0) < 0) {
@@ -987,7 +993,7 @@ LRational.prototype.valueOf = function(exact) {
     }
     return LFloat(this.__num__.valueOf()).div(this.__denom__.valueOf());
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LRational.prototype.mul = function(n) {
     if (!(n instanceof LNumber)) {
         n = LNumber(n); // handle (--> 1/2 (mul 2))
@@ -1000,7 +1006,7 @@ LRational.prototype.mul = function(n) {
     const [a, b] = LNumber.coerce(this, n);
     return a.mul(b);
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LRational.prototype.div = function(n) {
     if (!(n instanceof LNumber)) {
         n = LNumber(n); // handle (--> 1/2 (div 2))
@@ -1014,11 +1020,11 @@ LRational.prototype.div = function(n) {
     const ret = a.div(b);
     return ret;
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LRational.prototype._op = function(op, n) {
     return this[rev_mapping[op]](n);
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LRational.prototype.sub = function(n) {
     if (typeof n === 'undefined') {
         return this.mul(-1);
@@ -1039,7 +1045,7 @@ LRational.prototype.sub = function(n) {
     const [a, b] = LNumber.coerce(this, n);
     return a.add(b);
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LRational.prototype.add = function(n) {
     if (!(n instanceof LNumber)) {
         n = LNumber(n); // handle (--> 1/2 (add 1))
@@ -1065,7 +1071,7 @@ LRational.prototype.add = function(n) {
     const [a, b] = LNumber.coerce(this, n);
     return a.add(b);
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function LBigInteger(n, native) {
     if (typeof this !== 'undefined' && !(this instanceof LBigInteger) ||
         typeof this === 'undefined') {
@@ -1082,10 +1088,10 @@ function LBigInteger(n, native) {
         value: native
     });
 }
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LBigInteger.prototype = Object.create(LNumber.prototype);
 LBigInteger.prototype.constructor = LBigInteger;
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LBigInteger.bn_op = {
     '+': 'iadd',
     '-': 'isub',
@@ -1101,7 +1107,7 @@ LBigInteger.bn_op = {
 LBigInteger.prototype.serialize = function() {
     return this.__value__.toString();
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LBigInteger.prototype._op = function(op, n) {
     if (typeof n === 'undefined') {
         if (LNumber.isBN(this.__value__)) {
@@ -1139,11 +1145,11 @@ LBigInteger.prototype.sqrt = function() {
     }
     return value;
 };
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 LNumber.NaN = LNumber(NaN);
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // type coercion matrix
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 const matrix = (function() {
     var i = (a, b) => [a, b];
     return {
@@ -1215,13 +1221,47 @@ const matrix = (function() {
     }
 })();
 
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function coerce(type_a, type_b, a, b) {
     return matrix[type_a][type_b](a, b);
 }
 
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 const nan = LNumber(NaN);
 
-export { LNumber, LComplex, LFloat, LRational, LBigInteger, nan };
+// -----------------------------------------------------------------------------
+// :: abs that work on BigInt
+// -----------------------------------------------------------------------------
+function abs(x) {
+    return x < 0 ? -x : x;
+}
+
+// -----------------------------------------------------------------------------
+const truncate = (function() {
+    if (Math.trunc) {
+        return Math.trunc;
+    } else {
+        return function(x) {
+            if (x === 0) {
+                return 0;
+            } else if (x < 0) {
+                return Math.ceil(x);
+            } else {
+                return Math.floor(x);
+            }
+        };
+    }
+})();
+
+export {
+    LNumber,
+    LComplex,
+    LFloat,
+    LRational,
+    LBigInteger,
+    nan,
+    abs,
+    truncate,
+    rationalize
+};
 

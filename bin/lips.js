@@ -7,7 +7,7 @@ const options = lily(process.argv.slice(2), { boolean });
 
 const quiet = options.q || options.quiet;
 
-import lips from '../src/lips.js';
+import lips from '../src/index.js';
 
 const {
     exec,

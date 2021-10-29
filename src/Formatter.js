@@ -3,7 +3,18 @@
  * Copyright (c) 2018-2021 Jakub T. Jankiewicz <https://jcubic.pl/me>
  * Released under the MIT license
  */
-import { string_re, re_re, is_atom_string, is_symbol_string } from './Parser.js';
+/* global Symbol */
+import {
+    string_re,
+    re_re,
+    is_symbol_string,
+    is_special,
+    tokenize,
+    balanced,
+    previous_sexp
+} from './Parser.js';
+import LString from './LString.js';
+
 
 // ----------------------------------------------------------------------
 // :: token based pattern matching (used by formatter)
@@ -62,7 +73,7 @@ function match(pattern, input) {
                 if (!input[i].match(pattern[p])) {
                     return -1;
                 }
-            } else if (lips.LString.isString(pattern[p])) {
+            } else if (LString.isString(pattern[p])) {
                 if (pattern[p].valueOf() !== input[i]) {
                     return -1;
                 }
@@ -199,8 +210,8 @@ Formatter.exception_shift = function(token, settings) {
 // ----------------------------------------------------------------------
 Formatter.prototype._indent = function _indent(tokens, options) {
     var settings = this._options(options);
-    var spaces = lineIndent(tokens);
-    var sexp = previousSexp(tokens);
+    var spaces = line_indent(tokens);
+    var sexp = previous_sexp(tokens);
     // one character before S-Expression
     var before_sexpr = tokens[tokens.length - sexp.length - 1];
     var last = tokens[tokens.length - 1];
@@ -365,7 +376,7 @@ Formatter.prototype.break = function() {
             // some patterns require to check what was before like
             // if inside let binding
             if (count > 0 && !sexp[count]) {
-                sexp[count] = previousSexp(sub, count);
+                sexp[count] = previous_sexp(sub, count);
             }
         });
         for (let [pattern, count, ext] of rules) {
@@ -446,5 +457,27 @@ Formatter.prototype.format = function format(options) {
         return token.token;
     }).join('');
 };
+
+// ----------------------------------------------------------------------
+// :: find number of spaces in line
+// ----------------------------------------------------------------------
+function line_indent(tokens) {
+    if (!tokens || !tokens.length) {
+        return 0;
+    }
+    var i = tokens.length;
+    if (tokens[i - 1].token === '\n') {
+        return 0;
+    }
+    while (--i) {
+        if (tokens[i].token === '\n') {
+            var token = (tokens[i + 1] || {}).token;
+            if (token) {
+                return token.length;
+            }
+        }
+    }
+    return 0;
+}
 
 export { Formatter, Ahead, Pattern };

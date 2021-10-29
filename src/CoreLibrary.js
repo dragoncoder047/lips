@@ -3,8 +3,67 @@
  * Copyright (c) 2018-2021 Jakub T. Jankiewicz <https://jcubic.pl/me>
  * Released under the MIT license
  */
-import Environment from './Environment.js';
-import { complex_bare_re } from './Parser.js';
+/* global Symbol, Uint8Array */
+import {
+    typecheck_args,
+    typecheck,
+    type,
+    typecheck_text_port,
+    is_port,
+    is_prototype,
+    is_native,
+    is_lambda,
+    is_null,
+    type_error_message,
+    __lambda__,
+    __prototype__
+} from './typechecking.js';
+import Values from './Values.js';
+import {
+    doc,
+    unbind,
+    escape_regex,
+    set_fn_length,
+    to_array,
+    get_props,
+    pipe,
+    compose,
+    fold,
+    binary_math_op,
+    single_math_op,
+    reduce_math_op,
+    curry,
+    equal,
+    patch_value,
+    seq_compare
+} from './utils.js';
+import { unbox } from './boxing.js';
+import { BufferedOutputPort, InputPort, eof } from './Ports.js';
+import { resolve_promises, unpromise, promise_all, is_promise } from './Promises.js';
+import { Formatter } from './Formatter.js';
+import {
+    Macro,
+    Syntax,
+    let_macro,
+    quote,
+    quasiquote,
+    define_macro,
+    syntax_rules,
+    macro_expand
+} from './Macro.js';
+import { LSymbol, gensym } from './LSymbol.js';
+import { Pair, nil } from './Pair.js';
+import { LNumber, LFloat, abs, truncate } from './Numbers.js';
+import LCharacter from './LCharacter.js';
+import { unserialize, unserialize_bin } from './Compiler.js';
+import { specials, string_to_number, parse } from './Parser.js';
+import { evaluate, exec, prepare_fn_args } from './Evaluator.js';
+import { Environment, get } from './Environment.js';
+import LString from './LString.js';
+import Continuation from './Continuation.js';
+import root from './root.js';
+
+let fs, path, node_require;
 
 // -------------------------------------------------------------------------
 // function get internal protected data
@@ -12,6 +71,41 @@ import { complex_bare_re } from './Parser.js';
 function internal(env, name) {
     var internal_env = interaction(env, '**internal-env**');
     return internal_env.get(name);
+}
+
+// -------------------------------------------------------------------------
+function pararel(name, fn) {
+    return new Macro(name, function(code, { dynamic_scope, error } = {}) {
+        var env = this;
+        if (dynamic_scope) {
+            dynamic_scope = this;
+        }
+        var node = code;
+        var results = [];
+        while (node instanceof Pair) {
+            results.push(evaluate(node.car, { env, dynamic_scope, error }));
+            node = node.cdr;
+        }
+        var havePromises = results.filter(is_promise).length;
+        if (havePromises) {
+            return promise_all(results).then(fn.bind(this));
+        } else {
+            return fn.call(this, results);
+        }
+    });
+}
+
+// ----------------------------------------------------------------------
+// :: function that return mather function that match string against string
+// ----------------------------------------------------------------------
+function matcher(name, arg) {
+    if (arg instanceof RegExp) {
+        return x => String(x).match(arg);
+    } else if (is_function(arg)) {
+        // it will always be function
+        return arg;
+    }
+    throw new Error('Invalid matcher');
 }
 
 // -------------------------------------------------------------------------
@@ -102,7 +196,7 @@ var global_env = new Environment({
     // ------------------------------------------------------------------
     pprint: doc('pprint', function pprint(arg) {
         if (arg instanceof Pair) {
-            arg = new lips.Formatter(arg.toString(true)).break().format();
+            arg = new Formatter(arg.toString(true)).break().format();
             global_env.get('display').call(global_env, arg);
         } else {
             global_env.get('write').call(global_env, arg);
@@ -408,13 +502,13 @@ var global_env = new Environment({
         }
         if (is_node()) {
             return new Promise((resolve, reject) => {
-                var path = nodeRequire('path');
+                var path = node_require('path');
                 if (module_path) {
                     module_path = module_path.valueOf();
                     file = path.join(module_path, file);
                 }
                 global_env.set(PATH, path.dirname(file));
-                nodeRequire('fs').readFile(file, function(err, data) {
+                node_require('fs').readFile(file, function(err, data) {
                     if (err) {
                         reject(err);
                         global_env.set(PATH, module_path);
@@ -470,7 +564,7 @@ var global_env = new Environment({
         eval_args = { env: scope, dynamic_scope, error };
         while ((await evaluate(test.car, eval_args)) === false) {
             if (body !== nil) {
-                await lips.evaluate(body, eval_args);
+                await evaluate(body, eval_args);
             }
             let node = vars;
             const next = {};
@@ -708,7 +802,7 @@ var global_env = new Environment({
     'set-obj!': doc('set-obj!', function(obj, key, value) {
         var obj_type = typeof obj;
         if (is_null(obj) || (obj_type !== 'object' && obj_type !== 'function')) {
-            var msg = typeErrorMessage('set-obj!', type(obj), ['object', 'function']);
+            var msg = type_error_message('set-obj!', type(obj), ['object', 'function']);
             throw new Error(msg);
         }
         typecheck('set-obj!', key, ['string', 'symbol', 'number']);
@@ -889,14 +983,7 @@ var global_env = new Environment({
     // ------------------------------------------------------------------
     'syntax-rules': syntax_rules,
     // ------------------------------------------------------------------
-    quote: doc(new Macro('quote', function(arg) {
-        return quote(arg.car);
-    }), `(quote expression)
-
-         Macro that return single lips expression as data (it don't evaluate its
-         argument). It will return list of pairs if put in front of lips code.
-         And if put in fron of symbol it will return that symbol not value
-         associated with that name.`),
+    quote: quote,
     'unquote-splicing': doc('unquote-splicing', function() {
         throw new Error(`You can't call \`unquote-splicing\` outside of quasiquote`);
     }, `(unquote-splicing code)
@@ -914,347 +1001,7 @@ var global_env = new Environment({
         to evalute expression inside and return the value, the output is inserted
         into list structure created by queasiquote.`),
     // ------------------------------------------------------------------
-    quasiquote: Macro.defmacro('quasiquote', function(arg, env) {
-        var { dynamic_scope, error } = env;
-        var self = this;
-        //var max_unquote = 1;
-        if (dynamic_scope) {
-            dynamic_scope = self;
-        }
-        // -----------------------------------------------------------------
-        function is_struct(value) {
-            return value instanceof Pair ||
-                is_plain_object(value) ||
-                Array.isArray(value);
-        }
-        // -----------------------------------------------------------------
-        function resolve_pair(pair, fn, test = is_struct) {
-            if (pair instanceof Pair) {
-                var car = pair.car;
-                var cdr = pair.cdr;
-                if (test(car)) {
-                    car = fn(car);
-                }
-                if (test(cdr)) {
-                    cdr = fn(cdr);
-                }
-                if (is_promise(car) || is_promise(cdr)) {
-                    return promise_all([car, cdr]).then(([car, cdr]) => {
-                        return new Pair(car, cdr);
-                    });
-                } else {
-                    return new Pair(car, cdr);
-                }
-            }
-            return pair;
-        }
-        // -----------------------------------------------------------------
-        function join(eval_pair, value) {
-            if (eval_pair === nil && value === nil) {
-                //return nil;
-            }
-            if (eval_pair instanceof Pair) {
-                if (value !== nil) {
-                    eval_pair.append(value);
-                }
-            } else {
-                eval_pair = new Pair(
-                    eval_pair,
-                    value
-                );
-            }
-            return eval_pair;
-        }
-        // -----------------------------------------------------------------
-        function unquoted_arr(arr) {
-            return !!arr.filter(value => {
-                return value instanceof Pair &&
-                    LSymbol.is(value.car, /^(unquote|unquote-splicing)$/);
-            }).length;
-        }
-        // -----------------------------------------------------------------
-        function quote_vector(arr, unquote_cnt, max_unq) {
-            return arr.reduce((acc, x) => {
-                if (!(x instanceof Pair)) {
-                    acc.push(x);
-                    return acc;
-                }
-                if (LSymbol.is(x.car, 'unquote-splicing')) {
-                    let result;
-                    if (unquote_cnt + 1 < max_unq) {
-                        result = recur(x.cdr, unquote_cnt + 1, max_unq);
-                    } else {
-                        result = evaluate(x.cdr.car, {
-                            env: self,
-                            dynamic_scope,
-                            error
-                        });
-                    }
-                    if (!(result instanceof Pair)) {
-                        throw new Error(`Expecting list ${type(x)} found`);
-                    }
-                    return acc.concat(result.to_array());
-                }
-                acc.push(recur(x, unquote_cnt, max_unq));
-                return acc;
-            }, []);
-        }
-        // -----------------------------------------------------------------
-        function quote_object(object, unquote_cnt, max_unq) {
-            const result = {};
-            unquote_cnt++;
-            Object.keys(object).forEach(key => {
-                const value = object[key];
-                if (value instanceof Pair) {
-                    if (LSymbol.is(value.car, 'unquote-splicing')) {
-                        throw new Error("You can't call `unquote-splicing` " +
-                                        "inside object");
-                    }
-                    let output;
-                    if (unquote_cnt < max_unq) {
-                        output = recur(value.cdr.car, unquote_cnt, max_unq);
-                    } else {
-                        output = evaluate(value.cdr.car, {
-                            env: self,
-                            dynamic_scope,
-                            error
-                        });
-                    }
-                    result[key] = output;
-                } else {
-                    result[key] = value;
-                }
-            });
-            if (Object.isFrozen(object)) {
-                Object.freeze(result);
-            }
-            return result;
-        }
-        // -----------------------------------------------------------------
-        function unquote_splice(pair, unquote_cnt, max_unq) {
-            if (unquote_cnt < max_unq) {
-                return new Pair(
-                    new Pair(
-                        pair.car.car,
-                        recur(pair.car.cdr, unquote_cnt, max_unq)
-                    ),
-                    nil
-                );
-            }
-            var lists = [];
-            return (function next(node) {
-                var value = evaluate(node.car, {
-                    env: self,
-                    dynamic_scope,
-                    error
-                });
-                lists.push(value);
-                if (node.cdr instanceof Pair) {
-                    return next(node.cdr);
-                }
-                return unpromise(lists, function(arr) {
-                    if (arr.some(x => !(x instanceof Pair))) {
-                        if (pair.cdr instanceof Pair &&
-                            LSymbol.is(pair.cdr.car, '.') &&
-                            pair.cdr.cdr instanceof Pair &&
-                            pair.cdr.cdr.cdr === nil) {
-                            return pair.cdr.cdr.car;
-                        }
-                        if (!(pair.cdr === nil || pair.cdr instanceof Pair)) {
-                            const msg = "You can't splice atom inside list";
-                            throw new Error(msg);
-                        }
-                        if (arr.length > 1) {
-                            const msg = "You can't splice multiple atoms inside list";
-                            throw new Error(msg);
-                        }
-                        if (!(pair.cdr instanceof Pair && arr[0] === nil)) {
-                            return arr[0];
-                        }
-                    }
-                    // don't create Cycles
-                    arr = arr.map(eval_pair => {
-                        if (splices.has(eval_pair)) {
-                            return eval_pair.clone();
-                        } else {
-                            splices.add(eval_pair);
-                            return eval_pair;
-                        }
-                    });
-                    const value = recur(pair.cdr, 0, 1);
-                    if (value === nil && arr[0] === nil) {
-                        return undefined;
-                    }
-                    return unpromise(value, value => {
-                        if (arr[0] === nil) {
-                            return value;
-                        }
-                        if (arr.length === 1) {
-                            return join(arr[0], value);
-                        }
-                        var result = arr.reduce((result, eval_pair) => {
-                            return join(result, eval_pair);
-                        });
-                        return join(result, value);
-                    });
-                });
-            })(pair.car.cdr);
-        }
-        // -----------------------------------------------------------------
-        var splices = new Set();
-        function recur(pair, unquote_cnt, max_unq) {
-            if (pair instanceof Pair) {
-                if (pair.car instanceof Pair) {
-                    if (LSymbol.is(pair.car.car, 'unquote-splicing')) {
-                        return unquote_splice(pair, unquote_cnt + 1, max_unq);
-                    }
-                    if (LSymbol.is(pair.car.car, 'unquote')) {
-                        // + 2 - one for unquote and one for unquote splicing
-                        if (unquote_cnt + 2 === max_unq &&
-                            pair.car.cdr instanceof Pair &&
-                            pair.car.cdr.car instanceof Pair &&
-                            LSymbol.is(pair.car.cdr.car.car, 'unquote-splicing')) {
-                            const rest = pair.car.cdr;
-                            return new Pair(
-                                new Pair(
-                                    new LSymbol('unquote'),
-                                    unquote_splice(rest, unquote_cnt + 2, max_unq)
-                                ),
-                                nil
-                            );
-                        } else if (pair.car.cdr instanceof Pair &&
-                                   pair.car.cdr.cdr !== nil) {
-                            if (pair.car.cdr.car instanceof Pair) {
-                                // values inside unquote are lists
-                                const result = [];
-                                return (function recur(node) {
-                                    if (node === nil) {
-                                        return Pair.fromArray(result);
-                                    }
-                                    return unpromise(evaluate(node.car, {
-                                        env: self,
-                                        dynamic_scope,
-                                        error
-                                    }), function(next) {
-                                        result.push(next);
-                                        return recur(node.cdr);
-                                    });
-                                })(pair.car.cdr);
-                            } else {
-                                // same as in guile if (unquote 1 2 3) it should be
-                                // spliced - scheme spec say it's unspecify but it
-                                // work like in CL
-                                return pair.car.cdr;
-                            }
-                        }
-                    }
-                }
-                if (LSymbol.is(pair.car, 'quasiquote')) {
-                    var cdr = recur(pair.cdr, unquote_cnt, max_unq + 1);
-                    return new Pair(pair.car, cdr);
-                }
-                if (LSymbol.is(pair.car, 'quote')) {
-                    return new Pair(
-                        pair.car,
-                        recur(pair.cdr, unquote_cnt, max_unq)
-                    );
-                }
-                if (LSymbol.is(pair.car, 'unquote')) {
-                    unquote_cnt++;
-                    if (unquote_cnt < max_unq) {
-                        return new Pair(
-                            new LSymbol('unquote'),
-                            recur(pair.cdr, unquote_cnt, max_unq)
-                        );
-                    }
-                    if (unquote_cnt > max_unq) {
-                        throw new Error("You can't call `unquote` outside " +
-                                        "of quasiquote");
-                    }
-                    if (pair.cdr instanceof Pair) {
-                        if (pair.cdr.cdr !== nil) {
-                            if (pair.cdr.car instanceof Pair) {
-                                // TODO: test if this part is needed
-                                // this part was duplicated in previous section
-                                // if (LSymbol.is(pair.car.car, 'unquote')) {
-                                // so this probably can be removed
-                                const result = [];
-                                // evaluate all values in unquote
-                                return (function recur(node) {
-                                    if (node === nil) {
-                                        return Pair.fromArray(result);
-                                    }
-                                    return unpromise(evaluate(node.car, {
-                                        env: self,
-                                        dynamic_scope,
-                                        error
-                                    }), function(next) {
-                                        result.push(next);
-                                        return recur(node.cdr);
-                                    });
-                                })(pair.cdr);
-                            } else {
-                                return pair.cdr;
-                            }
-                        } else {
-                            return evaluate(pair.cdr.car, {
-                                env: self,
-                                dynamic_scope,
-                                error
-                            });
-                        }
-                    } else {
-                        return pair.cdr;
-                    }
-                }
-                return resolve_pair(pair, (pair) => {
-                    return recur(pair, unquote_cnt, max_unq);
-                });
-            } else if (is_plain_object(pair)) {
-                return quote_object(pair, unquote_cnt, max_unq);
-            } else if (pair instanceof Array) {
-                return quote_vector(pair, unquote_cnt, max_unq);
-            }
-            return pair;
-        }
-        // -----------------------------------------------------------------
-        function clear(node) {
-            if (node instanceof Pair) {
-                delete node[__data__];
-                if (!node.haveCycles('car')) {
-                    clear(node.car);
-                }
-                if (!node.haveCycles('cdr')) {
-                    clear(node.cdr);
-                }
-            }
-        }
-        // -----------------------------------------------------------------
-        if (is_plain_object(arg.car) && !unquoted_arr(Object.values(arg.car))) {
-            return quote(arg.car);
-        }
-        if (Array.isArray(arg.car) && !unquoted_arr(arg.car)) {
-            return quote(arg.car);
-        }
-        if (arg.car instanceof Pair &&
-            !arg.car.find('unquote') &&
-            !arg.car.find('unquote-splicing') &&
-            !arg.car.find('quasiquote')) {
-            return quote(arg.car);
-        }
-        var x = recur(arg.car, 0, 1);
-        return unpromise(x, value => {
-            // clear nested data for tests
-            clear(value);
-            return quote(value);
-        });
-    }, `(quasiquote list ,value ,@value)
-
-        Similar macro to \`quote\` but inside it you can use special
-        expressions unquote abbreviated to , that will evaluate expresion inside
-        and return its value or unquote-splicing abbreviated to ,@ that will
-        evaluate expression but return value without parenthesis (it will join)
-        the list with its value. Best used with macros but it can be used outside`),
+    quasiquote: quasiquote,
     // ------------------------------------------------------------------
     clone: doc('clone', function clone(list) {
         typecheck('clone', list, 'pair');
@@ -1309,7 +1056,7 @@ var global_env = new Environment({
             var arr = global_env.get('list->array')(arg).reverse();
             return global_env.get('array->list')(arr);
         } else if (!(arg instanceof Array)) {
-            throw new Error(typeErrorMessage('reverse', type(arg), 'array or pair'));
+            throw new Error(type_error_message('reverse', type(arg), 'array or pair'));
         } else {
             return arg.reverse();
         }
@@ -1335,7 +1082,7 @@ var global_env = new Environment({
         } else if (obj instanceof Array) {
             return obj[index];
         } else {
-            throw new Error(typeErrorMessage('nth', type(obj), 'array or pair', 2));
+            throw new Error(type_error_message('nth', type(obj), 'array or pair', 2));
         }
     }, `(nth index obj)
 
@@ -1665,28 +1412,12 @@ var global_env = new Environment({
         Function return length of the object, the object can be list
         or any object that have length property.`),
     // ------------------------------------------------------------------
-    'string->number': doc('string->number', function(arg, radix = 10) {
-        typecheck('string->number', arg, 'string', 1);
-        typecheck('string->number', radix, 'number', 2);
-        arg = arg.valueOf();
-        radix = radix.valueOf();
-        if (arg.match(rational_bare_re) || arg.match(rational_re)) {
-            return parse_rational(arg, radix);
-        } else if (arg.match(complex_bare_re) || arg.match(complex_re)) {
-            return parse_complex(arg, radix);
-        } else {
-            const valid_bare = (radix === 10 && !arg.match(/e/i)) || radix === 16;
-            if (arg.match(int_bare_re) && valid_bare || arg.match(int_re)) {
-                return parse_integer(arg, radix);
-            }
-            if (arg.match(float_re)) {
-                return parse_float(arg);
-            }
-        }
-        return false;
-    }, `(string->number number [radix])
+    'string->number': doc(
+        'string->number',
+        string_to_number,
+        `(string->number number [radix])
 
-        Function convert string to number.`),
+         Function convert string to number.`),
     // ------------------------------------------------------------------
     'try': doc(new Macro('try', function(code, { dynamic_scope, error }) {
         return new Promise((resolve, reject) => {
@@ -2393,8 +2124,8 @@ combinations(['d', 'a'], 2, 5).forEach(spec => {
 })();
 
 // -----------------------------------------------------------------------------
-function nodeModuleFind(dir) {
-    return reversseFind(dir, function(dir) {
+function node_module_find(dir) {
+    return reverse_find(dir, function(dir) {
         return fs.existsSync(path.join(dir, 'node_modules'));
     });
 }
@@ -2404,10 +2135,21 @@ function is_node() {
     return typeof global !== 'undefined' && global.global === global;
 }
 
+// -----------------------------------------------------------------------------
+function reverse_find(dir, fn) {
+    var parts = dir.split(path.sep).filter(Boolean);
+    for (var i = parts.length; i--;) {
+        var p = path.join('/', ...parts.slice(0, i + 1));
+        if (fn(p)) {
+            return p;
+        }
+    }
+}
+
 // -------------------------------------------------------------------------
 async function node_specific() {
     const { createRequire } = await import('module');
-    nodeRequire = createRequire(import.meta.url);
+    node_require = createRequire(import.meta.url);
     fs = await import('fs');
     path = await import('path');
     global_env.set('global', global);
@@ -2422,7 +2164,7 @@ async function node_specific() {
     global_env.set('require.resolve', doc('require.resolve', function(path) {
         typecheck('require.resolve', path, 'string');
         var name = path.valueOf();
-        return nodeRequire.resolve(name);
+        return node_require.resolve(name);
     }, `(require.resolve path)
 
            Return path relative the current module.`));
@@ -2434,17 +2176,17 @@ async function node_specific() {
         var value;
         try {
             if (module.match(/^\s*\./)) {
-                value = nodeRequire(path.join(root, module));
+                value = node_require(path.join(root, module));
             } else {
-                var dir = nodeModuleFind(root);
+                var dir = node_module_find(root);
                 if (dir) {
-                    value = nodeRequire(path.join(dir, 'node_modules', module));
+                    value = node_require(path.join(dir, 'node_modules', module));
                 } else {
-                    value = nodeRequire(module);
+                    value = node_require(module);
                 }
             }
         } catch (e) {
-            value = nodeRequire(module);
+            value = node_require(module);
         }
         return patch_value(value, global);
     }, `(require module)
@@ -2464,8 +2206,6 @@ if (is_node()) {
     global_env.set('window', undefined);
     global_env.set('global', undefined);
 }
-
-
 
 // -------------------------------------------------------------------------
 // simpler way to create interpreter with interaction-environment
@@ -2496,6 +2236,7 @@ function Interpreter(name, { stderr, stdin, stdout, ...obj } = {}) {
     }
     set_interaction_env(this.__env__, inter);
 }
+
 // -------------------------------------------------------------------------
 Interpreter.prototype.exec = function(code, dynamic = false, env = null) {
     typecheck('Interpreter::exec', code, ['string', 'array'], 1);
@@ -2508,6 +2249,7 @@ Interpreter.prototype.exec = function(code, dynamic = false, env = null) {
     }
     return exec(code, env, dynamic ? env : false);
 };
+
 // -------------------------------------------------------------------------
 Interpreter.prototype.get = function(value) {
     const result = this.__env__.get(value);
@@ -2516,10 +2258,12 @@ Interpreter.prototype.get = function(value) {
     }
     return result;
 };
+
 // -------------------------------------------------------------------------
 Interpreter.prototype.set = function(name, value) {
     return this.__env__.set(name, value);
 };
+
 // -------------------------------------------------------------------------
 Interpreter.prototype.constant = function(name, value) {
     return this.__env__.constant(name, value);

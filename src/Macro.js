@@ -3,13 +3,28 @@
  * Copyright (c) 2018-2021 Jakub T. Jankiewicz <https://jcubic.pl/me>
  * Released under the MIT license
  */
-import { typecheck } from './typechecking.js';
-import { Pair } from './Pair.js';
+/* global Symbol, Set */
+import {
+    type,
+    typecheck,
+    is_atom,
+    is_plain_object,
+    __data__
+} from './typechecking.js';
+import { Pair, nil } from './Pair.js';
 import { LNumber } from './Numbers.js';
+import { trim_lines, same_atom, hidden_prop } from './utils.js';
+import { evaluate } from './Evaluator.js';
+import { unpromise, promise_all, is_promise } from './Promises.js';
+import { Environment } from './Environment.js';
+import { global_env } from './CoreLibrary.js';
+import { LSymbol, gensym } from './LSymbol.js';
+import { is_debug, log, symbolize } from './debug.js';
+import LString from './LString.js';
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // :: Macro constructor
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function Macro(name, fn, doc, dump) {
     if (typeof this !== 'undefined' && this.constructor !== Macro ||
         typeof this === 'undefined') {
@@ -28,14 +43,14 @@ function Macro(name, fn, doc, dump) {
     this.__fn__ = fn;
 }
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 Macro.defmacro = function(name, fn, doc, dump) {
     var macro = new Macro(name, fn, doc, dump);
     macro.__defmacro__ = true;
     return macro;
 };
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 Macro.prototype.invoke = function(code, { env, dynamic_scope, error }, macro_expand) {
     var args = {
         dynamic_scope,
@@ -47,12 +62,12 @@ Macro.prototype.invoke = function(code, { env, dynamic_scope, error }, macro_exp
     //return macro_expand ? quote(result) : result;
 };
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 Macro.prototype.toString = function() {
     return `#<macro:${this.__name__}>`;
 };
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 const recur_guard = -10000;
 function macro_expand(single) {
     return async function(code, args) {
@@ -198,9 +213,9 @@ function macro_expand(single) {
     };
 }
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // TODO: Don't put Syntax as Macro they are not runtime
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function Syntax(fn, env) {
     this.__env__ = env;
     this.__fn__ = fn;
@@ -209,10 +224,10 @@ function Syntax(fn, env) {
 }
 Syntax.__merge_env__ = Symbol.for('merge');
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 Syntax.prototype = Object.create(Macro.prototype);
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 Syntax.prototype.invoke = function(code, { error, env }, macro_expand) {
     var args = {
         error,
@@ -223,10 +238,10 @@ Syntax.prototype.invoke = function(code, { error, env }, macro_expand) {
     return this.__fn__.call(env, code, args, this.__name__ || 'syntax');
 };
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 Syntax.prototype.constructor = Syntax;
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 Syntax.prototype.toString = function() {
     if (this.__name__) {
         return `#<syntax:${this.__name__}>`;
@@ -234,18 +249,17 @@ Syntax.prototype.toString = function() {
     return '#<syntax>';
 };
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // :: TODO: SRFI-139
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 class Parameter extends Syntax {
 }
 Syntax.Parameter = Parameter;
-// ----------------------------------------------------------------------
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // :: for usage in syntax-rule when pattern match it will return
 // :: list of bindings from code that match the pattern
 // :: TODO detect cycles
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function extract_patterns(pattern, code, symbols, ellipsis_symbol, scope = {}) {
     var bindings = {
         '...': {
@@ -517,11 +531,11 @@ function extract_patterns(pattern, code, symbols, ellipsis_symbol, scope = {}) {
     }
 }
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // :: This function is called after syntax-rules macro is evaluated
 // :: and if there are any gensyms added by macro they need to restored
 // :: to original symbols
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function clear_gensyms(node, gensyms) {
     function traverse(node) {
         if (node instanceof Pair) {
@@ -548,7 +562,7 @@ function clear_gensyms(node, gensyms) {
     return traverse(node);
 }
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function transform_syntax(options = {}) {
     const {
         bindings,
@@ -960,7 +974,7 @@ function transform_syntax(options = {}) {
     return traverse(expr, {});
 }
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 const syntax_rules = new Macro('syntax-rules', function(macro, options) {
     var { dynamic_scope, error } = options;
     var env = this;
@@ -1069,10 +1083,10 @@ const syntax_rules = new Macro('syntax-rules', function(macro, options) {
     Base of Hygienic macro, it will return new syntax expander
     that works like lisp macros.`);
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 const macro = 'define-macro';
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 const define_macro = new Macro(macro, function(macro, { dynamic_scope, error }) {
     if (macro.car instanceof Pair && macro.car.car instanceof LSymbol) {
         var name = macro.car.car.__name__;
@@ -1144,5 +1158,482 @@ const define_macro = new Macro(macro, function(macro, { dynamic_scope, error }) 
      macro the arguments will not be evaluated unless macro itself evaluate it.
      Because of this macro can manipulate expression (arguments) as lists.`);
 
+// -----------------------------------------------------------------------------
+// :: function that return macro for let, let* and letrec
+// -----------------------------------------------------------------------------
+function let_macro(symbol) {
+    var name;
+    switch (symbol) {
+        case Symbol.for('letrec'):
+            name = 'letrec';
+            break;
+        case Symbol.for('let'):
+            name = 'let';
+            break;
+        case Symbol.for('let*'):
+            name = 'let*';
+            break;
+        default:
+            throw new Error('Invalid let_macro value');
+    }
+    return Macro.defmacro(name, function(code, options) {
+        var { dynamic_scope, error, macro_expand } = options;
+        var args;
+        // named let:
+        // (let iter ((x 10)) (iter (- x 1))) -> (let* ((iter (lambda (x) ...
+        if (code.car instanceof LSymbol) {
+            if (!(code.cdr.car instanceof Pair || code.cdr.car === nil)) {
+                throw new Error('let require list of pairs');
+            }
+            var params;
+            if (code.cdr.car === nil) {
+                args = nil;
+                params = nil;
+            } else {
+                params = code.cdr.car.map(pair => pair.car);
+                args = code.cdr.car.map(pair => pair.cdr.car);
+            }
+            return Pair.fromArray([
+                LSymbol('letrec'),
+                [[code.car, Pair(
+                    LSymbol('lambda'),
+                    Pair(params, code.cdr.cdr))]],
+                Pair(code.car, args)
+            ]);
+        } else if (macro_expand) {
+            // Macro.defmacro are special macros that should return lisp code
+            // here we use evaluate, so we need to check special flag set by
+            // macroexpand to prevent evaluation of code in normal let
+            return;
+        }
+        var self = this;
+        args = global_env.get('list->array')(code.car);
+        var env = self.inherit(name);
+        var values, var_body_env;
+        if (name === 'let*') {
+            var_body_env = env;
+        } else if (name === 'let') {
+            values = []; // collect potential promises
+        }
+        var i = 0;
+        function exec() {
+            var output = new Pair(new LSymbol('begin'), code.cdr);
+            return evaluate(output, {
+                env,
+                dynamic_scope,
+                error
+            });
+        }
+        return (function loop() {
+            var pair = args[i++];
+            if (dynamic_scope) {
+                dynamic_scope = name === 'let*' ? env : self;
+            }
+            if (!pair) {
+                // resolve all promises
+                if (values && values.length) {
+                    var v = values.map(x => x.value);
+                    var promises = v.filter(is_promise);
+                    if (promises.length) {
+                        return promise_all(v).then((arr) => {
+                            for (var i = 0, len = arr.length; i < len; ++i) {
+                                env.set(values[i].name, arr[i]);
+                            }
+                        }).then(exec);
+                    } else {
+                        for (let { name, value } of values) {
+                            env.set(name, value);
+                        }
+                    }
+                }
+                return exec();
+            } else {
+                if (name === 'let') {
+                    var_body_env = self;
+                } else if (name === 'letrec') {
+                    var_body_env = env;
+                }
+                var value = evaluate(pair.cdr.car, {
+                    env: var_body_env,
+                    dynamic_scope,
+                    error
+                });
+                if (name === 'let*') {
+                    var_body_env = env = var_body_env.inherit('let*[' + i + ']');
+                }
+                if (values) {
+                    values.push({ name: pair.car, value });
+                    return loop();
+                } else {
+                    return unpromise(value, function(value) {
+                        env.set(pair.car, value);
+                        return loop();
+                    });
+                }
+            }
+        })();
+    });
+}
 
-export { Macro, macro_expand, Syntax, syntax_rules, define_macro };
+// -----------------------------------------------------------------------------
+const quasiquote = Macro.defmacro('quasiquote', function(arg, env) {
+    var { dynamic_scope, error } = env;
+    var self = this;
+    //var max_unquote = 1;
+    if (dynamic_scope) {
+        dynamic_scope = self;
+    }
+    // -----------------------------------------------------------------
+    function is_struct(value) {
+        return value instanceof Pair ||
+            is_plain_object(value) ||
+            Array.isArray(value);
+    }
+    // -----------------------------------------------------------------
+    function resolve_pair(pair, fn, test = is_struct) {
+        if (pair instanceof Pair) {
+            var car = pair.car;
+            var cdr = pair.cdr;
+            if (test(car)) {
+                car = fn(car);
+            }
+            if (test(cdr)) {
+                cdr = fn(cdr);
+            }
+            if (is_promise(car) || is_promise(cdr)) {
+                return promise_all([car, cdr]).then(([car, cdr]) => {
+                    return new Pair(car, cdr);
+                });
+            } else {
+                return new Pair(car, cdr);
+            }
+        }
+        return pair;
+    }
+    // -----------------------------------------------------------------
+    function join(eval_pair, value) {
+        if (eval_pair === nil && value === nil) {
+            //return nil;
+        }
+        if (eval_pair instanceof Pair) {
+            if (value !== nil) {
+                eval_pair.append(value);
+            }
+        } else {
+            eval_pair = new Pair(
+                eval_pair,
+                value
+            );
+        }
+        return eval_pair;
+    }
+    // -----------------------------------------------------------------
+    function unquoted_arr(arr) {
+        return !!arr.filter(value => {
+            return value instanceof Pair &&
+                LSymbol.is(value.car, /^(unquote|unquote-splicing)$/);
+        }).length;
+    }
+    // -----------------------------------------------------------------
+    function quote_vector(arr, unquote_cnt, max_unq) {
+        return arr.reduce((acc, x) => {
+            if (!(x instanceof Pair)) {
+                acc.push(x);
+                return acc;
+            }
+            if (LSymbol.is(x.car, 'unquote-splicing')) {
+                let result;
+                if (unquote_cnt + 1 < max_unq) {
+                    result = recur(x.cdr, unquote_cnt + 1, max_unq);
+                } else {
+                    result = evaluate(x.cdr.car, {
+                        env: self,
+                        dynamic_scope,
+                        error
+                    });
+                }
+                if (!(result instanceof Pair)) {
+                    throw new Error(`Expecting list ${type(x)} found`);
+                }
+                return acc.concat(result.to_array());
+            }
+            acc.push(recur(x, unquote_cnt, max_unq));
+            return acc;
+        }, []);
+    }
+    // -----------------------------------------------------------------
+    function quote_object(object, unquote_cnt, max_unq) {
+        const result = {};
+        unquote_cnt++;
+        Object.keys(object).forEach(key => {
+            const value = object[key];
+            if (value instanceof Pair) {
+                if (LSymbol.is(value.car, 'unquote-splicing')) {
+                    throw new Error("You can't call `unquote-splicing` " +
+                                    "inside object");
+                }
+                let output;
+                if (unquote_cnt < max_unq) {
+                    output = recur(value.cdr.car, unquote_cnt, max_unq);
+                } else {
+                    output = evaluate(value.cdr.car, {
+                        env: self,
+                        dynamic_scope,
+                        error
+                    });
+                }
+                result[key] = output;
+            } else {
+                result[key] = value;
+            }
+        });
+        if (Object.isFrozen(object)) {
+            Object.freeze(result);
+        }
+        return result;
+    }
+    // -----------------------------------------------------------------
+    function unquote_splice(pair, unquote_cnt, max_unq) {
+        if (unquote_cnt < max_unq) {
+            return new Pair(
+                new Pair(
+                    pair.car.car,
+                    recur(pair.car.cdr, unquote_cnt, max_unq)
+                ),
+                nil
+            );
+        }
+        var lists = [];
+        return (function next(node) {
+            var value = evaluate(node.car, {
+                env: self,
+                dynamic_scope,
+                error
+            });
+            lists.push(value);
+            if (node.cdr instanceof Pair) {
+                return next(node.cdr);
+            }
+            return unpromise(lists, function(arr) {
+                if (arr.some(x => !(x instanceof Pair))) {
+                    if (pair.cdr instanceof Pair &&
+                        LSymbol.is(pair.cdr.car, '.') &&
+                        pair.cdr.cdr instanceof Pair &&
+                        pair.cdr.cdr.cdr === nil) {
+                        return pair.cdr.cdr.car;
+                    }
+                    if (!(pair.cdr === nil || pair.cdr instanceof Pair)) {
+                        const msg = "You can't splice atom inside list";
+                        throw new Error(msg);
+                    }
+                    if (arr.length > 1) {
+                        const msg = "You can't splice multiple atoms inside list";
+                        throw new Error(msg);
+                    }
+                    if (!(pair.cdr instanceof Pair && arr[0] === nil)) {
+                        return arr[0];
+                    }
+                }
+                // don't create Cycles
+                arr = arr.map(eval_pair => {
+                    if (splices.has(eval_pair)) {
+                        return eval_pair.clone();
+                    } else {
+                        splices.add(eval_pair);
+                        return eval_pair;
+                    }
+                });
+                const value = recur(pair.cdr, 0, 1);
+                if (value === nil && arr[0] === nil) {
+                    return undefined;
+                }
+                return unpromise(value, value => {
+                    if (arr[0] === nil) {
+                        return value;
+                    }
+                    if (arr.length === 1) {
+                        return join(arr[0], value);
+                    }
+                    var result = arr.reduce((result, eval_pair) => {
+                        return join(result, eval_pair);
+                    });
+                    return join(result, value);
+                });
+            });
+        })(pair.car.cdr);
+    }
+    // -----------------------------------------------------------------
+    var splices = new Set();
+    function recur(pair, unquote_cnt, max_unq) {
+        if (pair instanceof Pair) {
+            if (pair.car instanceof Pair) {
+                if (LSymbol.is(pair.car.car, 'unquote-splicing')) {
+                    return unquote_splice(pair, unquote_cnt + 1, max_unq);
+                }
+                if (LSymbol.is(pair.car.car, 'unquote')) {
+                    // + 2 - one for unquote and one for unquote splicing
+                    if (unquote_cnt + 2 === max_unq &&
+                        pair.car.cdr instanceof Pair &&
+                        pair.car.cdr.car instanceof Pair &&
+                        LSymbol.is(pair.car.cdr.car.car, 'unquote-splicing')) {
+                        const rest = pair.car.cdr;
+                        return new Pair(
+                            new Pair(
+                                new LSymbol('unquote'),
+                                unquote_splice(rest, unquote_cnt + 2, max_unq)
+                            ),
+                            nil
+                        );
+                    } else if (pair.car.cdr instanceof Pair &&
+                               pair.car.cdr.cdr !== nil) {
+                        if (pair.car.cdr.car instanceof Pair) {
+                            // values inside unquote are lists
+                            const result = [];
+                            return (function recur(node) {
+                                if (node === nil) {
+                                    return Pair.fromArray(result);
+                                }
+                                return unpromise(evaluate(node.car, {
+                                    env: self,
+                                    dynamic_scope,
+                                    error
+                                }), function(next) {
+                                    result.push(next);
+                                    return recur(node.cdr);
+                                });
+                            })(pair.car.cdr);
+                        } else {
+                            // same as in guile if (unquote 1 2 3) it should be
+                            // spliced - scheme spec say it's unspecify but it
+                            // work like in CL
+                            return pair.car.cdr;
+                        }
+                    }
+                }
+            }
+            if (LSymbol.is(pair.car, 'quasiquote')) {
+                var cdr = recur(pair.cdr, unquote_cnt, max_unq + 1);
+                return new Pair(pair.car, cdr);
+            }
+            if (LSymbol.is(pair.car, 'quote')) {
+                return new Pair(
+                    pair.car,
+                    recur(pair.cdr, unquote_cnt, max_unq)
+                );
+            }
+            if (LSymbol.is(pair.car, 'unquote')) {
+                unquote_cnt++;
+                if (unquote_cnt < max_unq) {
+                    return new Pair(
+                        new LSymbol('unquote'),
+                        recur(pair.cdr, unquote_cnt, max_unq)
+                    );
+                }
+                if (unquote_cnt > max_unq) {
+                    throw new Error("You can't call `unquote` outside " +
+                                    "of quasiquote");
+                }
+                if (pair.cdr instanceof Pair) {
+                    if (pair.cdr.cdr !== nil) {
+                        if (pair.cdr.car instanceof Pair) {
+                            // TODO: test if this part is needed
+                            // this part was duplicated in previous section
+                            // if (LSymbol.is(pair.car.car, 'unquote')) {
+                            // so this probably can be removed
+                            const result = [];
+                            // evaluate all values in unquote
+                            return (function recur(node) {
+                                if (node === nil) {
+                                    return Pair.fromArray(result);
+                                }
+                                return unpromise(evaluate(node.car, {
+                                    env: self,
+                                    dynamic_scope,
+                                    error
+                                }), function(next) {
+                                    result.push(next);
+                                    return recur(node.cdr);
+                                });
+                            })(pair.cdr);
+                        } else {
+                            return pair.cdr;
+                        }
+                    } else {
+                        return evaluate(pair.cdr.car, {
+                            env: self,
+                            dynamic_scope,
+                            error
+                        });
+                    }
+                } else {
+                    return pair.cdr;
+                }
+            }
+            return resolve_pair(pair, (pair) => {
+                return recur(pair, unquote_cnt, max_unq);
+            });
+        } else if (is_plain_object(pair)) {
+            return quote_object(pair, unquote_cnt, max_unq);
+        } else if (pair instanceof Array) {
+            return quote_vector(pair, unquote_cnt, max_unq);
+        }
+        return pair;
+    }
+    // -----------------------------------------------------------------
+    function clear(node) {
+        if (node instanceof Pair) {
+            delete node[__data__];
+            if (!node.haveCycles('car')) {
+                clear(node.car);
+            }
+            if (!node.haveCycles('cdr')) {
+                clear(node.cdr);
+            }
+        }
+    }
+    // -----------------------------------------------------------------
+    if (is_plain_object(arg.car) && !unquoted_arr(Object.values(arg.car))) {
+        return quote(arg.car);
+    }
+    if (Array.isArray(arg.car) && !unquoted_arr(arg.car)) {
+        return quote(arg.car);
+    }
+    if (arg.car instanceof Pair &&
+        !arg.car.find('unquote') &&
+        !arg.car.find('unquote-splicing') &&
+        !arg.car.find('quasiquote')) {
+        return quote(arg.car);
+    }
+    var x = recur(arg.car, 0, 1);
+    return unpromise(x, value => {
+        // clear nested data for tests
+        clear(value);
+        return quote(value);
+    });
+}, `(quasiquote list ,value ,@value)
+
+    Similar macro to \`quote\` but inside it you can use special
+    expressions unquote abbreviated to , that will evaluate expresion inside
+    and return its value or unquote-splicing abbreviated to ,@ that will
+    evaluate expression but return value without parenthesis (it will join)
+    the list with its value. Best used with macros but it can be used outside`);
+
+const quote = new Macro('quote', function(arg) {
+    return quote(arg.car);
+}, `(quote expression)
+
+     Macro that return single lips expression as data (it don't evaluate its
+     argument). It will return list of pairs if put in front of lips code.
+     And if put in fron of symbol it will return that symbol not value
+     associated with that name.`);
+
+export {
+    Macro,
+    Syntax,
+    macro_expand,
+    syntax_rules,
+    define_macro,
+    let_macro,
+    quote,
+    quasiquote
+};

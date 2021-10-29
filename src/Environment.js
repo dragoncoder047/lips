@@ -317,4 +317,4 @@ var get = doc('get', function get(object, ...args) {
     \`get\` is an alias because . don't work in every place, e.g. you can't
     pass it as argument.`);
 
-export default Environment;
+export { Environment, get };

@@ -14,10 +14,9 @@ import Values from './Values.js';
 import Continuation from './Continuation.js';
 import { Syntax, Macro } from './Macro.js';
 
-
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // hidden props
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 const __fn__ = Symbol.for('__fn__');
 const __method__ = Symbol.for('__method__');
 const __context__ = Symbol.for('__context__');
@@ -25,7 +24,7 @@ const __prototype__ = Symbol.for('__prototype__');
 const __lambda__ = Symbol.for('__lambda__');
 const __data__ = Symbol.for('__data__');
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function typecheck(fn, arg, expected, position = null) {
     fn = fn.valueOf();
     const arg_type = type(arg).toLowerCase();
@@ -55,7 +54,7 @@ function typecheck(fn, arg, expected, position = null) {
     }
 }
 
-// -------------------------------------------------------------------------
+// --------------------------------------------------------------------------------
 function type_error_message(fn, got, expected, position = null) {
     let postfix = fn ? ` in expression \`${fn}\`` : '';
     if (position !== null) {
@@ -75,14 +74,14 @@ function type_error_message(fn, got, expected, position = null) {
     return `Expecting ${expected}, got ${got}${postfix}`;
 }
 
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function typecheck_args(fn, args, expected) {
     args.forEach((arg, i) => {
         typecheck(fn, arg, expected, i + 1);
     });
 }
 
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function typecheck_text_port(fn, arg, type) {
     typecheck(fn, arg, type);
     if (arg.__type__ === __binary_port__) {
@@ -94,7 +93,7 @@ function typecheck_text_port(fn, arg, type) {
     }
 }
 
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function type(obj) {
     var mapping = {
         'pair': Pair,
@@ -153,39 +152,39 @@ function type(obj) {
     return typeof obj;
 }
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // :: check for nullish values
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function is_null(value) {
     return is_undef(value) || value === nil || value === null;
 }
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function is_continuation(o) {
     return o instanceof Continuation;
 }
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function is_callable(o) {
     return is_function(o) || is_continuation(o);
 }
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function is_function(o) {
     return typeof o === 'function' && typeof o.bind === 'function';
 }
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function is_undef(value) {
     return typeof value === 'undefined';
 }
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function is_plain_object(object) {
     return object && typeof object === 'object' && object.constructor === Object;
 }
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function is_atom(obj) {
     return obj instanceof LSymbol ||
         LString.isString(obj) ||
@@ -197,12 +196,12 @@ function is_atom(obj) {
         obj === false;
 }
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function is_port(obj) {
     return obj instanceof InputPort || obj instanceof OutputPort;
 }
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function is_port_method(obj) {
     if (is_function(obj)) {
         if (is_port(obj[__context__])) {
@@ -212,23 +211,44 @@ function is_port_method(obj) {
     return false;
 }
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+var props = Object.getOwnPropertyNames(Array.prototype);
+var array_methods = [];
+props.forEach(x => {
+    array_methods.push(Array[x], Array.prototype[x]);
+});
+
+// -----------------------------------------------------------------------------
+function is_array_method(x) {
+    if (is_bound(x)) {
+        // same as unbind from utils to prevent circular depedency
+        x = x[__fn__];
+    }
+    return array_methods.includes(x);
+}
+
+// -----------------------------------------------------------------------------
+function is_lips_function(x) {
+    return is_function(x) && (is_lambda(x) || x.__doc__);
+}
+
+// -----------------------------------------------------------------------------
 function is_lambda(obj) {
     return obj && obj[__lambda__];
 }
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function is_method(obj) {
     return obj && obj[__method__];
 }
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function is_raw_lambda(fn) {
     return is_lambda(fn) && !fn[__prototype__] &&
         !is_method(fn) && !is_port_method(fn);
 }
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function is_native_function(fn) {
     var native = Symbol.for('__native__');
     return is_function(fn) &&
@@ -237,34 +257,44 @@ function is_native_function(fn) {
          (!fn.name.match(/^bound /) && !fn[native]));
 }
 
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function is_native(obj) {
     return obj instanceof LNumber ||
         obj instanceof LString ||
         obj instanceof LCharacter;
 }
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function is_iterator(obj, symbol) {
     if (has_own_symbol(obj, symbol) || has_own_symbol(obj.__proto__, symbol)) {
         return is_function(obj[symbol]);
     }
 }
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // function used to check if function should not get unboxed arguments,
 // so you can call Object.getPrototypeOf for lips data types
 // this is case, see dir function and #73
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function is_object_bound(obj) {
     return is_bound(obj) && obj[Symbol.for('__context__')] === Object;
 }
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+function is_prototype(obj) {
+    return obj &&
+        typeof obj === 'object' &&
+        obj.hasOwnProperty &&
+        obj.hasOwnProperty("constructor") &&
+        typeof obj.constructor === "function" &&
+        obj.constructor.prototype === obj;
+}
+
+// -----------------------------------------------------------------------------
 function is_bound(obj) {
     return !!(is_function(obj) && obj[__fn__]);
 }
 
-// -------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function has_own_symbol(obj, symbol) {
     if (obj === null) {
         return false;
@@ -273,7 +303,7 @@ function has_own_symbol(obj, symbol) {
         symbol in Object.getOwnPropertySymbols(obj);
 }
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function has_own_function(obj, name) {
     return obj.hasOwnProperty(name) && is_function(obj.toString);
 }
@@ -285,6 +315,9 @@ export {
     type,
     __fn__,
     __data__,
+    __lambda__,
+    __context__,
+    __prototype__,
     typecheck_text_port,
     is_null,
     is_continuation,
@@ -294,11 +327,14 @@ export {
     is_plain_object,
     is_atom,
     is_port,
+    is_prototype,
     is_port_method,
     is_lambda,
     is_method,
     is_raw_lambda,
     is_native_function,
+    is_array_method,
+    is_lips_function,
     is_native,
     is_iterator,
     is_object_bound,

@@ -3,7 +3,29 @@
  * Copyright (c) 2018-2021 Jakub T. Jankiewicz <https://jcubic.pl/me>
  * Released under the MIT license
  */
-// ----------------------------------------------------------------------
+import { LNumber, nan } from './Numbers.js';
+import { QuotedPromise } from './Promises.js';
+import { is_plain_object } from './typechecking.js';
+import LString from './LString.js';
+import LCharacter from './LCharacter.js';
+
+// -----------------------------------------------------------------------------
+function map_object(object, fn) {
+    const props = Object.getOwnPropertyNames(object);
+    const symbols = Object.getOwnPropertySymbols(object);
+    props.concat(symbols).forEach(key => {
+        const value = fn(object[key]);
+        // check if property is read only, happen with webpack
+        // and __esModule, it can happen for other properties as well
+        const descriptor = Object.getOwnPropertyDescriptor(object, key);
+        if (!descriptor || descriptor.writable && object[key] !== value) {
+            object[key] = value;
+        }
+    });
+    return object;
+}
+
+// -----------------------------------------------------------------------------
 function unbox(object) {
     var lips_type = [LString, LCharacter, LNumber].some(x => object instanceof x);
     if (lips_type) {
@@ -21,7 +43,7 @@ function unbox(object) {
     return object;
 }
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function box(object) {
     // we only need to box lips data, arrays and object don't need
     // to be boxed, values from objects will be boxed when accessed
@@ -40,5 +62,6 @@ function box(object) {
     return object;
 }
 
+// -----------------------------------------------------------------------------
 
 export { box, unbox };

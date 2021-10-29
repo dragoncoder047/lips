@@ -3,12 +3,19 @@
  * Copyright (c) 2018-2021 Jakub T. Jankiewicz <https://jcubic.pl/me>
  * Released under the MIT license
  */
+/* global Symbol, Map */
+import { is_plain_object, is_native, __data__ } from './typechecking.js';
+import { trampoline, Thunk } from './trampoline.js';
+import { LSymbol } from './LSymbol.js';
+import { LNumber } from './Numbers.js';
+import LString from './LString.js';
 
 const __cycles__ = Symbol.for('__cycles__');
 const __ref__ = Symbol.for('__ref__');
-// ------------------------------------------------------------------------------------
+
+// -----------------------------------------------------------------------------
 // :: Nil class with only once instance
-// ------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 class Nil {
     toString() {
         return '()';
@@ -29,12 +36,13 @@ class Nil {
         return [];
     }
 }
-// ------------------------------------------------------------------------------------
+
+// -----------------------------------------------------------------------------
 const nil = new Nil();
 
-// ------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // :: Pair constructor
-// ------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function Pair(car, cdr) {
     if (typeof this !== 'undefined' && this.constructor !== Pair ||
         typeof this === 'undefined') {
@@ -291,13 +299,13 @@ Pair.prototype.map = function(fn) {
         return nil;
     }
 };
-// ----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 Pair.prototype.markCycles = function() {
     markCycles(this);
     return this;
 };
 
-// ----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 Pair.prototype.haveCycles = function(name = null) {
     if (!name) {
         return this.haveCycles('car') || this.haveCycles('cdr');
@@ -305,7 +313,7 @@ Pair.prototype.haveCycles = function(name = null) {
     return !!(this[__cycles__] && this[__cycles__][name]);
 };
 
-// ----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 function markCycles(pair) {
     var seen_pairs = [];
     var cycles = [];
@@ -367,9 +375,9 @@ function markCycles(pair) {
     });
 }
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // trampoline based recursive pair to string that don't overflow the stack
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 /* eslint-disable no-unused-vars */
 /* istanbul ignore next */
 const pair_to_string = (function() {
@@ -431,7 +439,7 @@ const pair_to_string = (function() {
     });
 })();
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 Pair.prototype.toString = function(quote, { nested = false } = {}) {
     var arr = [];
     if (this[__ref__]) {
@@ -470,7 +478,7 @@ Pair.prototype.toString = function(quote, { nested = false } = {}) {
     return arr.join('');
 };
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 Pair.prototype.set = function(prop, value) {
     this[prop] = value;
     if (value instanceof Pair) {
@@ -478,7 +486,7 @@ Pair.prototype.set = function(prop, value) {
     }
 };
 
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 Pair.prototype.append = function(arg) {
     if (arg instanceof Array) {
         return this.append(Pair.fromArray(arg));
@@ -503,16 +511,18 @@ Pair.prototype.append = function(arg) {
     }
     return this;
 };
-// ----------------------------------------------------------------------
+
+// -----------------------------------------------------------------------------
 Pair.prototype.serialize = function() {
     return [
         this.car,
         this.cdr
     ];
 };
-// ----------------------------------------------------------------------
+
+// -----------------------------------------------------------------------------
 // :: List iterator (for do-iterator macro)
-// ----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 Pair.prototype[Symbol.iterator] = function() {
     var node = this;
     return {
@@ -527,5 +537,35 @@ Pair.prototype[Symbol.iterator] = function() {
         }
     };
 };
+
+// -----------------------------------------------------------------------------
+// :: flatten nested arrays
+// :: ref: https://stackoverflow.com/a/27282907/387194
+// -----------------------------------------------------------------------------
+function flatten(array, mutable) {
+    var toString = Object.prototype.toString;
+    var arrayTypeStr = '[object Array]';
+
+    var result = [];
+    var nodes = (mutable && array) || array.slice();
+    var node;
+
+    if (!array.length) {
+        return result;
+    }
+
+    node = nodes.pop();
+
+    do {
+        if (toString.call(node) === arrayTypeStr) {
+            nodes.push.apply(nodes, node);
+        } else {
+            result.push(node);
+        }
+    } while (nodes.length && (node = nodes.pop()) !== undefined);
+
+    result.reverse(); // we reverse result to restore the original order
+    return result;
+}
 
 export { nil, Nil, Pair, markCycles };

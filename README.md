@@ -1,9 +1,9 @@
-![LIPS - Scheme Based Powerful Lisp Language](https://github.com/jcubic/lips/blob/devel/assets/lips.svg?raw=true)
+![LIPS - Scheme Based Powerful Lisp Language](https://github.com/jcubic/lips/blob/es-modules/assets/lips.svg?raw=true)
 
 [![npm](https://img.shields.io/badge/npm-1.0.0%E2%80%93beta.14-blue.svg)](https://www.npmjs.com/package/@jcubic/lips)
 ![1.0.0 Complete](https://img.shields.io/github/milestones/progress-percent/jcubic/lips/1?label=1.0.0%20Complete)
-[![travis](https://travis-ci.com/jcubic/lips.svg?branch=devel&bb25142451a939a80b2e668528e7949497d8a8d1)](https://travis-ci.com/jcubic/lips)
-[![Coverage Status](https://coveralls.io/repos/github/jcubic/lips/badge.svg?branch=devel&c4718a7f131af9e8661ca26097f3db4b)](https://coveralls.io/github/jcubic/lips?branch=devel)
+[![travis](https://travis-ci.com/jcubic/lips.svg?branch=es-modules&30c36f8162d4bf0be147df88131cf07b235f1629)](https://travis-ci.com/jcubic/lips)
+[![Coverage Status](https://coveralls.io/repos/github/jcubic/lips/badge.svg?branch=es-modules&c4718a7f131af9e8661ca26097f3db4b)](https://coveralls.io/github/jcubic/lips?branch=es-modules)
 [![Join Gitter Chat](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/jcubic/lips)
 [![GitHub license](https://img.shields.io/github/license/jcubic/lips.svg)](https://github.com/jcubic/lips/blob/master/LICENSE)
 ![NPM Download Count](https://img.shields.io/npm/dm/@jcubic/lips)
@@ -156,7 +156,7 @@ npm install -g @jcubic/lips@beta
 
 you can run the interpreter from the terminal:
 
-![LIPS: Scheme interactive terminal](https://github.com/jcubic/lips/blob/devel/assets/screencast.gif?raw=true)
+![LIPS: Scheme interactive terminal](https://github.com/jcubic/lips/blob/es-modules/assets/screencast.gif?raw=true)
 
 
 You can also run code in a string with:
@@ -198,7 +198,7 @@ Because LIPS is tree walking interpreter sometimes it may be slow. Especially if
 process long arrays and use callback function. If the array is quite large each pice of code
 inside the callback may slow down the processing. For example see:
 
-script [reference.scm](https://github.com/jcubic/lips/blob/devel/scripts/reference.scm)
+script [reference.scm](https://github.com/jcubic/lips/blob/es-modules/scripts/reference.scm)
 
 That generates reference documentation for all builtin functions and macros.
 The slow part is `(names.sort name-compare)` (`Array::sort`) that take quite time to calculate,

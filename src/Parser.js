@@ -12,9 +12,9 @@ import Stack from './Stack.js';
 import LCharacter from './LCharacter.js';
 import LString from './LString.js';
 import { read_only } from './utils.js';
-import { is_plain_object } from './typechecking.js';
+import { is_plain_object, typecheck } from './typechecking.js';
 import { global_env, user_env } from './CoreLibrary.js';
-import { evaluate } from './eval.js';
+import { evaluate } from './Evaluator.js';
 import { Macro } from './Macro.js';
 
 /* eslint-disable max-len */
@@ -1349,11 +1349,63 @@ function multiline_formatter(meta) {
     };
 }
 
+// ----------------------------------------------------------------------
+function string_to_number(arg, radix = 10) {
+    typecheck('string->number', arg, 'string', 1);
+    typecheck('string->number', radix, 'number', 2);
+    arg = arg.valueOf();
+    radix = radix.valueOf();
+    if (arg.match(rational_bare_re) || arg.match(rational_re)) {
+        return parse_rational(arg, radix);
+    } else if (arg.match(complex_bare_re) || arg.match(complex_re)) {
+        return parse_complex(arg, radix);
+    } else {
+        const valid_bare = (radix === 10 && !arg.match(/e/i)) || radix === 16;
+        if (arg.match(int_bare_re) && valid_bare || arg.match(int_re)) {
+            return parse_integer(arg, radix);
+        }
+        if (arg.match(float_re)) {
+            return parse_float(arg);
+        }
+    }
+    return false;
+}
+
+// ----------------------------------------------------------------------
+// return last S-Expression
+// @param tokens - array of tokens (objects from tokenizer or strings)
+// @param sexp - number of expression to look behind
+// ----------------------------------------------------------------------
+function previous_sexp(tokens, sexp = 1) {
+    var i = tokens.length;
+    if (sexp <= 0) {
+        throw Error(`previous_sexp: Invalid argument sexp = ${sexp}`);
+    }
+    outer: while (sexp-- && i >= 0) {
+        var count = 1;
+        while (count > 0) {
+            var token = tokens[--i];
+            if (!token) {
+                break outer;
+            }
+            if (token === '(' || token.token === '(') {
+                count--;
+            } else if (token === ')' || token.token === ')') {
+                count++;
+            }
+        }
+        i--;
+    }
+    return tokens.slice(i + 1);
+}
+
 export {
     tokenize,
     parse,
     Lexer,
     Parser,
+    string_to_number,
+    previous_sexp,
     is_symbol_string,
     is_atom_string,
     complex_bare_re,

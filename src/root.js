@@ -3,4 +3,7 @@
  * Copyright (c) 2018-2021 Jakub T. Jankiewicz <https://jcubic.pl/me>
  * Released under the MIT license
  */
-export default const root = typeof global !== 'undefined' ? global : self;
+
+const root = typeof global !== 'undefined' ? global : self;
+
+export default root;

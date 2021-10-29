@@ -7,13 +7,13 @@
 import {
     typecheck,
     type,
+    is_null,
     is_function,
     is_bound,
     is_atom,
     is_lambda,
     is_plain_object,
     is_native_function,
-    is_promise,
     __fn__,
     __data__
 } from './typechecking.js';
@@ -21,8 +21,9 @@ import { box } from './boxing.js';
 import { nil, Pair } from './Pair.js';
 import { LNumber } from './Numbers.js';
 import { LSymbol } from './LSymbol.js';
-import LString from './LString.js';
+import { is_promise } from './Promises.js';
 import LCharacter from './LCharacter.js';
+import LString from './LString.js';
 
 function to_array(name, deep) {
     return function recur(list) {
@@ -297,6 +298,106 @@ function quote(value) {
     return value;
 }
 
+// -------------------------------------------------------------------------
+function guard_math_call(fn, ...args) {
+    args.forEach(arg => {
+        typecheck('', arg, 'number');
+    });
+    return fn(...args);
+}
+
+// ----------------------------------------------------------------------
+function pipe(...fns) {
+    fns.forEach((fn, i) => {
+        typecheck('pipe', fn, 'function', i + 1);
+    });
+    return (...args) => {
+        return fns.reduce((args, f) => [f.apply(this, args)], args)[0];
+    };
+}
+
+// -------------------------------------------------------------------------
+function compose(...fns) {
+    fns.forEach((fn, i) => {
+        typecheck('compose', fn, 'function', i + 1);
+    });
+    return pipe(...fns.reverse());
+}
+
+// -------------------------------------------------------------------------
+// :: fold functions generator
+// -------------------------------------------------------------------------
+function fold(name, fold) {
+    var self = this;
+    return function recur(fn, init, ...lists) {
+        typecheck(name, fn, 'function');
+        if (lists.some(is_null)) {
+            if (typeof init === 'number') {
+                return LNumber(init);
+            }
+            return init;
+        } else {
+            return fold.call(self, recur, fn, init, ...lists);
+        }
+    };
+}
+// -------------------------------------------------------------------------
+function limit_math_op(n, fn) {
+    // + 1 so it inlcude function in guard_math_call
+    return limit(n + 1, curry(guard_math_call, fn));
+}
+// -------------------------------------------------------------------------
+// some functional magic
+const single_math_op = curry(limit_math_op, 1);
+const binary_math_op = curry(limit_math_op, 2);
+// -------------------------------------------------------------------------
+function reduce_math_op(fn, init = null) {
+    return function(...args) {
+        if (init !== null) {
+            args = [init, ...args];
+        }
+        return args.reduce(binary_math_op(fn));
+    };
+}
+// -------------------------------------------------------------------------
+function curry(fn, ...init_args) {
+    typecheck('curry', fn, 'function');
+    var len = fn.length;
+    return function() {
+        var args = init_args.slice();
+        function call(...more_args) {
+            args = args.concat(more_args);
+            if (args.length >= len) {
+                return fn.apply(this, args);
+            } else {
+                return call;
+            }
+        }
+        return call.apply(this, arguments);
+    };
+}
+// -------------------------------------------------------------------------
+// return function with limited number of arguments
+// -------------------------------------------------------------------------
+function limit(n, fn) {
+    typecheck('limit', fn, 'function', 2);
+    return function(...args) {
+        return fn(...args.slice(0, n));
+    };
+}
+
+// -------------------------------------------------------------------------
+function seq_compare(fn, args) {
+    var [a, ...rest] = args;
+    while (rest.length > 0) {
+        var [b] = rest;
+        if (!fn(a, b)) {
+            return false;
+        }
+        [a, ...rest] = rest;
+    }
+    return true;
+}
 
 export {
     to_array,
@@ -314,5 +415,14 @@ export {
     doc,
     trim_lines,
     patch_value,
-    quote
+    quote,
+    pipe,
+    compose,
+    fold,
+    binary_math_op,
+    single_math_op,
+    reduce_math_op,
+    curry,
+    limit,
+    seq_compare
 };

@@ -3,6 +3,8 @@
  * Copyright (c) 2018-2021 Jakub T. Jankiewicz <https://jcubic.pl/me>
  * Released under the MIT license
  */
+import { typecheck } from './typechecking.js';
+import LCharacter from './LCharacter.js';
 // -----------------------------------------------------------------------------
 // :: String wrapper that handle copy and in place change
 // -----------------------------------------------------------------------------

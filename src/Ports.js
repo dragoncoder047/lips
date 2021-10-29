@@ -8,7 +8,8 @@ import { typecheck, type_error_message } from './typechecking.js';
 import { Parser } from './Parser.js';
 import { nil } from './Pair.js';
 import { read_only } from './utils.js';
-import { LNumber } from './LNumber.js';
+import { LNumber } from './Numbers.js';
+import { global_env, user_env } from './CoreLibrary.js';
 import LString from './LString.js';
 
 // -------------------------------------------------------------------------
