@@ -13,8 +13,6 @@
  *
  * includes:
  *
- * unfetch by Jason Miller (@developit) MIT License
- *
  * contentloaded.js
  *
  * Author: Diego Perini (diego.perini at gmail.com)

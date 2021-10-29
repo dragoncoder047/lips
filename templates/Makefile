@@ -116,4 +116,4 @@ coveralls:
 	$(NPM) run coverage
 
 lint:
-	$(ESLINT) src/lips.js
+	$(ESLINT) src/*.js
